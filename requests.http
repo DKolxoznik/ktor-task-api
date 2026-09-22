@@ -1,0 +1,96 @@
+### Файл для HTTP-клиента IntelliJ IDEA: откройте и жмите ▶ слева от запроса.
+@host = http://localhost:8080
+
+### Информация об API
+GET {{host}}/
+
+### Health-check
+GET {{host}}/health
+
+### Все задачи
+GET {{host}}/api/tasks
+
+### Фильтр по статусу (query-параметр)
+GET {{host}}/api/tasks?status=TODO
+
+### Фильтр по приоритету + поиск по тексту
+GET {{host}}/api/tasks?priority=HIGH&q=ktor
+
+### Пагинация и сортировка
+GET {{host}}/api/tasks?page=1&size=2&sort=TITLE&order=DESC
+
+### Одна задача по id (path-параметр)
+GET {{host}}/api/tasks/1
+
+### Задачи по статусу в пути (enum как path-параметр)
+GET {{host}}/api/tasks/status/IN_PROGRESS
+
+### Создание задачи -> 201 Created + заголовок Location
+POST {{host}}/api/tasks
+Content-Type: application/json
+
+{
+  "title": "Проверить API вручную",
+  "description": "Прощёлкать все маршруты",
+  "status": "TODO",
+  "priority": "HIGH"
+}
+
+### Обновление задачи -> 200 OK
+PUT {{host}}/api/tasks/1
+Content-Type: application/json
+
+{
+  "status": "DONE"
+}
+
+### Удаление одной задачи -> 204 No Content
+DELETE {{host}}/api/tasks/5
+
+### Массовое удаление по статусу -> 200 OK
+DELETE {{host}}/api/tasks?status=DONE
+
+### --- Ошибки ---
+
+### 400: id не число
+GET {{host}}/api/tasks/abc
+
+### 400: неизвестное значение enum
+GET {{host}}/api/tasks?status=WRONG
+
+### 400: size больше максимума
+GET {{host}}/api/tasks?size=1000
+
+### 404: задачи не существует
+GET {{host}}/api/tasks/9999
+
+### 404: маршрута не существует
+GET {{host}}/api/nothing-here
+
+### 409: заголовок уже занят
+POST {{host}}/api/tasks
+Content-Type: application/json
+
+{
+  "title": "Изучить Ktor"
+}
+
+### 415: нет Content-Type: application/json
+POST {{host}}/api/tasks
+Content-Type: text/plain
+
+{ "title": "Без правильного типа" }
+
+### 422: пустой title
+POST {{host}}/api/tasks
+Content-Type: application/json
+
+{
+  "title": "   "
+}
+
+### 400: тело не является корректным JSON
+POST {{host}}/api/tasks
+Content-Type: application/json
+
+{ это не json }
