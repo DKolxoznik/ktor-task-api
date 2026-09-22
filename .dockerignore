@@ -1,0 +1,12 @@
+.git
+.gitignore
+.gradle
+.idea
+.kotlin
+.run
+build
+*.md
+!README.md
+docker-compose.yml
+Dockerfile
+requests.http

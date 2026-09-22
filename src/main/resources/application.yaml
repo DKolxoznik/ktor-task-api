@@ -1,0 +1,13 @@
+ktor:
+  deployment:
+    # "$PORT:8080" = взять переменную окружения PORT, иначе 8080 (удобно в Docker)
+    port: "$PORT:8080"
+    host: "0.0.0.0"
+    shutdownGracePeriod: 1000
+    shutdownTimeout: 5000
+  application:
+    modules:
+      - com.example.taskapi.ApplicationKt.module
+
+app:
+  version: "1.0.0"
