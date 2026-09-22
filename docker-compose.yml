@@ -1,0 +1,10 @@
+services:
+  api:
+    build: .
+    image: ktor-task-api:1.0.0
+    container_name: ktor-task-api
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+    restart: unless-stopped
