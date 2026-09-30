@@ -10,4 +10,12 @@ ktor:
       - com.example.taskapi.ApplicationKt.module
 
 app:
-  version: "1.0.0"
+  version: "2.0.0"
+
+# JWT: секрет можно переопределить переменной JWT_SECRET
+jwt:
+  secret: "$JWT_SECRET:ktor-task-api-dev-secret-change-me-in-production"
+  issuer: "ktor-task-api"
+  audience: "ktor-task-api-users"
+  realm: "ktor-task-api"
+  expiresInSeconds: "3600"

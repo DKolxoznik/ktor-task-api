@@ -1,5 +1,5 @@
 # ---------- Этап 1: сборка ----------
-FROM gradle:8.14.3-jdk17 AS build
+FROM gradle:9.7.1-jdk17 AS build
 
 WORKDIR /home/gradle/project
 

@@ -1,5 +1,7 @@
 ### Файл для HTTP-клиента IntelliJ IDEA: откройте и жмите ▶ слева от запроса.
+### После входа скопируйте accessToken в переменную token.
 @host = http://localhost:8080
+@token = вставьте_сюда_accessToken
 
 ### Информация об API
 GET {{host}}/
@@ -7,27 +9,87 @@ GET {{host}}/
 ### Health-check
 GET {{host}}/health
 
+### --- Аутентификация (публично) ---
+
+### Регистрация -> 201 Created
+POST {{host}}/api/auth/register
+Content-Type: application/json
+
+{
+  "username": "alice",
+  "password": "secret1"
+}
+
+### Повторная регистрация того же логина -> 409 Conflict
+POST {{host}}/api/auth/register
+Content-Type: application/json
+
+{
+  "username": "alice",
+  "password": "secret1"
+}
+
+### Короткий пароль -> 422
+POST {{host}}/api/auth/register
+Content-Type: application/json
+
+{
+  "username": "bob",
+  "password": "123"
+}
+
+### Вход -> 200 OK, в ответе accessToken и userId
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "alice",
+  "password": "secret1"
+}
+
+### Неверный пароль -> 401
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "alice",
+  "password": "wrong!!"
+}
+
+### --- Чтение задач (публично, токен не нужен) ---
+
 ### Все задачи
 GET {{host}}/api/tasks
 
-### Фильтр по статусу (query-параметр)
-GET {{host}}/api/tasks?status=TODO
-
-### Фильтр по приоритету + поиск по тексту
-GET {{host}}/api/tasks?priority=HIGH&q=ktor
-
-### Пагинация и сортировка
-GET {{host}}/api/tasks?page=1&size=2&sort=TITLE&order=DESC
-
-### Одна задача по id (path-параметр)
+### Одна задача по id
 GET {{host}}/api/tasks/1
 
-### Задачи по статусу в пути (enum как path-параметр)
-GET {{host}}/api/tasks/status/IN_PROGRESS
+### Фильтр по статусу
+GET {{host}}/api/tasks?status=TODO
 
-### Создание задачи -> 201 Created + заголовок Location
+### --- Изменение задач (нужен Authorization: Bearer) ---
+
+### Создание без токена -> 401
 POST {{host}}/api/tasks
 Content-Type: application/json
+
+{
+  "title": "Без токена"
+}
+
+### Создание с недействительным токеном -> 401
+POST {{host}}/api/tasks
+Content-Type: application/json
+Authorization: Bearer not.a.valid.token
+
+{
+  "title": "Битый токен"
+}
+
+### Создание задачи -> 201 Created
+POST {{host}}/api/tasks
+Content-Type: application/json
+Authorization: Bearer {{token}}
 
 {
   "title": "Проверить API вручную",
@@ -39,6 +101,7 @@ Content-Type: application/json
 ### Обновление задачи -> 200 OK
 PUT {{host}}/api/tasks/1
 Content-Type: application/json
+Authorization: Bearer {{token}}
 
 {
   "status": "DONE"
@@ -46,51 +109,28 @@ Content-Type: application/json
 
 ### Удаление одной задачи -> 204 No Content
 DELETE {{host}}/api/tasks/5
+Authorization: Bearer {{token}}
 
 ### Массовое удаление по статусу -> 200 OK
 DELETE {{host}}/api/tasks?status=DONE
+Authorization: Bearer {{token}}
 
-### --- Ошибки ---
+### Удаление без токена -> 401
+DELETE {{host}}/api/tasks/1
+
+### --- Прочие ошибки ---
 
 ### 400: id не число
 GET {{host}}/api/tasks/abc
 
-### 400: неизвестное значение enum
-GET {{host}}/api/tasks?status=WRONG
-
-### 400: size больше максимума
-GET {{host}}/api/tasks?size=1000
-
 ### 404: задачи не существует
 GET {{host}}/api/tasks/9999
 
-### 404: маршрута не существует
-GET {{host}}/api/nothing-here
-
-### 409: заголовок уже занят
+### 422: пустой title (с токеном)
 POST {{host}}/api/tasks
 Content-Type: application/json
-
-{
-  "title": "Изучить Ktor"
-}
-
-### 415: нет Content-Type: application/json
-POST {{host}}/api/tasks
-Content-Type: text/plain
-
-{ "title": "Без правильного типа" }
-
-### 422: пустой title
-POST {{host}}/api/tasks
-Content-Type: application/json
+Authorization: Bearer {{token}}
 
 {
   "title": "   "
 }
-
-### 400: тело не является корректным JSON
-POST {{host}}/api/tasks
-Content-Type: application/json
-
-{ это не json }

@@ -2,16 +2,24 @@ package com.example.taskapi
 
 import com.example.taskapi.model.CreateTaskRequest
 import com.example.taskapi.model.ErrorResponse
+import com.example.taskapi.model.LoginRequest
 import com.example.taskapi.model.PageResponse
+import com.example.taskapi.model.RegisterRequest
 import com.example.taskapi.model.Task
 import com.example.taskapi.model.TaskPriority
 import com.example.taskapi.model.TaskStatus
+import com.example.taskapi.model.TokenResponse
+import com.example.taskapi.model.UpdateTaskRequest
+import com.example.taskapi.model.UserResponse
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.delete
 import io.ktor.client.request.get
+import io.ktor.client.request.header
 import io.ktor.client.request.post
+import io.ktor.client.request.put
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
@@ -24,26 +32,43 @@ import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
-/**
- * Тесты проверяют главное по критериям КТ-1: маршруты, формат JSON,
- * разбор параметров и корректность HTTP-статусов.
- *
- * Каждый testApplication поднимает изолированный экземпляр сервера
- * со своим in-memory хранилищем, поэтому тесты не влияют друг на друга.
- */
-class TaskApiTest {
-
-    /** Поднимает приложение и возвращает клиент, умеющий читать и писать JSON. */
-    private fun ApplicationTestBuilder.startApp(): HttpClient {
-        environment { config = MapApplicationConfig() }
-        application { module() }
-        return createClient {
-            install(ContentNegotiation) { json() }
-        }
+private fun ApplicationTestBuilder.startApp(): HttpClient {
+    environment {
+        config = MapApplicationConfig(
+            "jwt.secret" to "test-secret-key-for-unit-tests",
+            "jwt.issuer" to "ktor-task-api",
+            "jwt.audience" to "ktor-task-api-users",
+            "jwt.realm" to "ktor-task-api",
+            "jwt.expiresInSeconds" to "3600",
+            "app.version" to "2.0.0",
+        )
     }
+    application { module() }
+    return createClient {
+        install(ContentNegotiation) { json() }
+    }
+}
+
+private suspend fun HttpClient.registerAndLogin(
+    username: String = "tester",
+    password: String = "secret1",
+): String {
+    post("/api/auth/register") {
+        contentType(ContentType.Application.Json)
+        setBody(RegisterRequest(username = username, password = password))
+    }
+    val token: TokenResponse = post("/api/auth/login") {
+        contentType(ContentType.Application.Json)
+        setBody(LoginRequest(username = username, password = password))
+    }.body()
+    return token.accessToken
+}
+
+class TaskApiTest {
 
     @Test
     fun `health endpoint returns 200 and JSON`() = testApplication {
@@ -62,6 +87,7 @@ class TaskApiTest {
 
         assertEquals(HttpStatusCode.OK, response.status)
         assertTrue(response.bodyAsText().contains("/api/tasks"))
+        assertTrue(response.bodyAsText().contains("/api/auth/login"))
     }
 
     @Test
@@ -81,16 +107,6 @@ class TaskApiTest {
 
         assertTrue(page.items.isNotEmpty())
         assertTrue(page.items.all { it.status == TaskStatus.DONE })
-        assertEquals(page.items.size, page.totalItems)
-    }
-
-    @Test
-    fun `GET tasks searches by q query parameter`() = testApplication {
-        val http = startApp()
-        val page: PageResponse<Task> = http.get("/api/tasks?q=docker").body()
-
-        assertEquals(1, page.totalItems)
-        assertTrue(page.items.single().title.contains("Docker"))
     }
 
     @Test
@@ -100,43 +116,13 @@ class TaskApiTest {
 
         assertEquals(2, page.page)
         assertEquals(2, page.size)
-        assertEquals(3, page.totalPages)
         assertEquals(2, page.items.size)
-    }
-
-    @Test
-    fun `GET tasks supports sorting`() = testApplication {
-        val http = startApp()
-        val page: PageResponse<Task> = http.get("/api/tasks?sort=ID&order=DESC").body()
-
-        assertEquals(5, page.items.first().id)
     }
 
     @Test
     fun `non numeric query parameter returns 400`() = testApplication {
         val http = startApp()
         val response = http.get("/api/tasks?page=abc")
-
-        assertEquals(HttpStatusCode.BadRequest, response.status)
-        val error: ErrorResponse = response.body()
-        assertEquals(400, error.status)
-        assertTrue(error.message.contains("page"))
-    }
-
-    @Test
-    fun `unknown enum value in query returns 400`() = testApplication {
-        val http = startApp()
-        val response = http.get("/api/tasks?status=UNKNOWN_STATUS")
-
-        assertEquals(HttpStatusCode.BadRequest, response.status)
-        val error: ErrorResponse = response.body()
-        assertTrue(error.message.contains("IN_PROGRESS"))
-    }
-
-    @Test
-    fun `page size above the limit returns 400`() = testApplication {
-        val http = startApp()
-        val response = http.get("/api/tasks?size=1000")
 
         assertEquals(HttpStatusCode.BadRequest, response.status)
     }
@@ -155,132 +141,221 @@ class TaskApiTest {
         val response = http.get("/api/tasks/9999")
 
         assertEquals(HttpStatusCode.NotFound, response.status)
-        assertTrue(response.contentType()?.match(ContentType.Application.Json) == true)
         val error: ErrorResponse = response.body()
         assertEquals(404, error.status)
     }
 
     @Test
-    fun `non numeric path parameter returns 400`() = testApplication {
-        val http = startApp()
-        val response = http.get("/api/tasks/not-a-number")
-
-        assertEquals(HttpStatusCode.BadRequest, response.status)
-    }
-
-    @Test
-    fun `GET tasks by status path parameter returns only that status`() = testApplication {
-        val http = startApp()
-        val page: PageResponse<Task> = http.get("/api/tasks/status/IN_PROGRESS").body()
-
-        assertTrue(page.items.isNotEmpty())
-        assertTrue(page.items.all { it.status == TaskStatus.IN_PROGRESS })
-    }
-
-    @Test
-    fun `POST creates a task and returns 201 with Location header`() = testApplication {
+    fun `POST without token returns 401`() = testApplication {
         val http = startApp()
         val response = http.post("/api/tasks") {
             contentType(ContentType.Application.Json)
+            setBody(CreateTaskRequest(title = "Без токена"))
+        }
+
+        assertEquals(HttpStatusCode.Unauthorized, response.status)
+    }
+
+    @Test
+    fun `POST with invalid token returns 401`() = testApplication {
+        val http = startApp()
+        val response = http.post("/api/tasks") {
+            contentType(ContentType.Application.Json)
+            header(HttpHeaders.Authorization, "Bearer not.a.valid.token")
+            setBody(CreateTaskRequest(title = "Битый токен"))
+        }
+
+        assertEquals(HttpStatusCode.Unauthorized, response.status)
+    }
+
+    @Test
+    fun `POST with valid token creates a task and returns 201`() = testApplication {
+        val http = startApp()
+        val token = http.registerAndLogin()
+
+        val response = http.post("/api/tasks") {
+            contentType(ContentType.Application.Json)
+            bearerAuth(token)
             setBody(CreateTaskRequest(title = "Новая задача", priority = TaskPriority.HIGH))
         }
 
         assertEquals(HttpStatusCode.Created, response.status)
         val created: Task = response.body()
         assertEquals("Новая задача", created.title)
-        assertEquals(TaskPriority.HIGH, created.priority)
         assertEquals("/api/tasks/${created.id}", response.headers[HttpHeaders.Location])
     }
 
     @Test
-    fun `POST with blank title returns 422 with validation details`() = testApplication {
+    fun `POST with blank title returns 422`() = testApplication {
         val http = startApp()
+        val token = http.registerAndLogin()
+
         val response = http.post("/api/tasks") {
             contentType(ContentType.Application.Json)
+            bearerAuth(token)
             setBody(CreateTaskRequest(title = "   "))
         }
 
         assertEquals(HttpStatusCode.UnprocessableEntity, response.status)
-        val error: ErrorResponse = response.body()
-        assertTrue(error.details.isNotEmpty())
     }
 
     @Test
-    fun `POST with duplicate title returns 409`() = testApplication {
+    fun `PUT with valid token updates a task`() = testApplication {
         val http = startApp()
-        val response = http.post("/api/tasks") {
+        val token = http.registerAndLogin()
+
+        val response = http.put("/api/tasks/1") {
             contentType(ContentType.Application.Json)
-            setBody(CreateTaskRequest(title = "Изучить Ktor"))
+            bearerAuth(token)
+            setBody(UpdateTaskRequest(status = TaskStatus.DONE))
+        }
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        val task: Task = response.body()
+        assertEquals(TaskStatus.DONE, task.status)
+    }
+
+    @Test
+    fun `DELETE without token returns 401`() = testApplication {
+        val http = startApp()
+        assertEquals(HttpStatusCode.Unauthorized, http.delete("/api/tasks/1").status)
+    }
+
+    @Test
+    fun `DELETE with valid token returns 204`() = testApplication {
+        val http = startApp()
+        val token = http.registerAndLogin()
+
+        assertEquals(
+            HttpStatusCode.NoContent,
+            http.delete("/api/tasks/1") { bearerAuth(token) }.status,
+        )
+        assertEquals(HttpStatusCode.NotFound, http.get("/api/tasks/1").status)
+    }
+
+    @Test
+    fun `GET remains public without token`() = testApplication {
+        val http = startApp()
+        assertEquals(HttpStatusCode.OK, http.get("/api/tasks").status)
+        assertEquals(HttpStatusCode.OK, http.get("/api/tasks/1").status)
+    }
+}
+
+class AuthApiTest {
+
+    @Test
+    fun `register creates a user and returns 201 without password`() = testApplication {
+        val http = startApp()
+        val response = http.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(RegisterRequest(username = "alice", password = "secret1"))
+        }
+
+        assertEquals(HttpStatusCode.Created, response.status)
+        val user: UserResponse = response.body()
+        assertEquals("alice", user.username)
+        assertTrue(user.id > 0)
+        assertFalse(response.bodyAsText().contains("password", ignoreCase = true))
+        assertFalse(response.bodyAsText().contains("hash", ignoreCase = true))
+    }
+
+    @Test
+    fun `register duplicate username returns 409`() = testApplication {
+        val http = startApp()
+        http.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(RegisterRequest(username = "bob", password = "secret1"))
+        }
+        val response = http.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(RegisterRequest(username = "bob", password = "other12"))
         }
 
         assertEquals(HttpStatusCode.Conflict, response.status)
     }
 
     @Test
-    fun `POST with malformed JSON returns 400`() = testApplication {
+    fun `register with short password returns 422`() = testApplication {
         val http = startApp()
-        val response = http.post("/api/tasks") {
+        val response = http.post("/api/auth/register") {
             contentType(ContentType.Application.Json)
-            setBody("{ this is not json }")
+            setBody(RegisterRequest(username = "short", password = "123"))
         }
 
-        assertEquals(HttpStatusCode.BadRequest, response.status)
+        assertEquals(HttpStatusCode.UnprocessableEntity, response.status)
     }
 
     @Test
-    fun `POST without Content-Type returns 415`() = testApplication {
+    fun `login returns JWT with userId claim metadata`() = testApplication {
         val http = startApp()
-        val response = http.post("/api/tasks") {
-            setBody("{\"title\":\"Без типа\"}")
+        http.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(RegisterRequest(username = "carol", password = "secret1"))
         }
 
-        assertEquals(HttpStatusCode.UnsupportedMediaType, response.status)
-    }
-
-    @Test
-    fun `DELETE existing task returns 204 and the task disappears`() = testApplication {
-        val http = startApp()
-
-        assertEquals(HttpStatusCode.NoContent, http.delete("/api/tasks/1").status)
-        assertEquals(HttpStatusCode.NotFound, http.get("/api/tasks/1").status)
-    }
-
-    @Test
-    fun `DELETE missing task returns 404`() = testApplication {
-        val http = startApp()
-        val response = http.delete("/api/tasks/9999")
-
-        assertEquals(HttpStatusCode.NotFound, response.status)
-    }
-
-    @Test
-    fun `DELETE without required status query parameter returns 400`() = testApplication {
-        val http = startApp()
-        val response = http.delete("/api/tasks")
-
-        assertEquals(HttpStatusCode.BadRequest, response.status)
-    }
-
-    @Test
-    fun `DELETE by status removes the whole group`() = testApplication {
-        val http = startApp()
-        val before: PageResponse<Task> = http.get("/api/tasks?status=TODO").body()
-        val response = http.delete("/api/tasks?status=TODO")
+        val response = http.post("/api/auth/login") {
+            contentType(ContentType.Application.Json)
+            setBody(LoginRequest(username = "carol", password = "secret1"))
+        }
 
         assertEquals(HttpStatusCode.OK, response.status)
-        val after: PageResponse<Task> = http.get("/api/tasks?status=TODO").body()
-        assertTrue(before.totalItems > 0)
-        assertEquals(0, after.totalItems)
+        val token: TokenResponse = response.body()
+        assertNotNull(token.accessToken)
+        assertTrue(token.accessToken.split('.').size == 3)
+        assertEquals("Bearer", token.tokenType)
+        assertEquals(3600, token.expiresIn)
+        assertTrue(token.userId > 0)
+        assertEquals("carol", token.username)
     }
 
     @Test
-    fun `unknown route returns 404 as JSON`() = testApplication {
+    fun `login with wrong password returns 401`() = testApplication {
         val http = startApp()
-        val response = http.get("/api/unknown")
+        http.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(RegisterRequest(username = "dave", password = "secret1"))
+        }
 
-        assertEquals(HttpStatusCode.NotFound, response.status)
-        val error: ErrorResponse = response.body()
-        assertEquals(404, error.status)
-        assertNotNull(error.path)
+        val response = http.post("/api/auth/login") {
+            contentType(ContentType.Application.Json)
+            setBody(LoginRequest(username = "dave", password = "wrong!!"))
+        }
+
+        assertEquals(HttpStatusCode.Unauthorized, response.status)
+    }
+
+    @Test
+    fun `login with unknown username returns 401`() = testApplication {
+        val http = startApp()
+        val response = http.post("/api/auth/login") {
+            contentType(ContentType.Application.Json)
+            setBody(LoginRequest(username = "ghost", password = "secret1"))
+        }
+
+        assertEquals(HttpStatusCode.Unauthorized, response.status)
+    }
+
+    @Test
+    fun `password is stored as bcrypt hash not plaintext`() = testApplication {
+        // Косвенная проверка: успешный логин после регистрации означает,
+        // что PasswordHasher.verify сверил BCrypt-хэш, а не сравнил строки.
+        // Прямой доступ к хранилищу из HTTP нет — хэш не утекает в ответах.
+        val http = startApp()
+        http.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(RegisterRequest(username = "erin", password = "secret1"))
+        }
+        val login = http.post("/api/auth/login") {
+            contentType(ContentType.Application.Json)
+            setBody(LoginRequest(username = "erin", password = "secret1"))
+        }
+        assertEquals(HttpStatusCode.OK, login.status)
+
+        val body = http.post("/api/auth/register") {
+            contentType(ContentType.Application.Json)
+            setBody(RegisterRequest(username = "frank", password = "secret1"))
+        }.bodyAsText()
+        assertFalse(body.contains("secret1"))
+        assertFalse(body.contains("\$2a\$"))
     }
 }

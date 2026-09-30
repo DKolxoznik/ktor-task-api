@@ -2,6 +2,7 @@ val ktorVersion: String by project
 val kotlinVersion: String by project
 val logbackVersion: String by project
 val serializationVersion: String by project
+val bcryptVersion: String by project
 
 plugins {
     kotlin("jvm") version "2.2.20"
@@ -10,7 +11,7 @@ plugins {
 }
 
 group = "com.example"
-version = "1.0.0"
+version = "2.0.0"
 
 repositories {
     mavenCentral()
@@ -43,6 +44,11 @@ dependencies {
     implementation("io.ktor:ktor-server-default-headers:$ktorVersion")
     implementation("io.ktor:ktor-server-cors:$ktorVersion")
     implementation("ch.qos.logback:logback-classic:$logbackVersion")
+
+    // Аутентификация: JWT + BCrypt (КТ-2)
+    implementation("io.ktor:ktor-server-auth:$ktorVersion")
+    implementation("io.ktor:ktor-server-auth-jwt:$ktorVersion")
+    implementation("at.favre.lib:bcrypt:$bcryptVersion")
 
     // Tests
     testImplementation(platform("org.junit:junit-bom:5.14.4"))
