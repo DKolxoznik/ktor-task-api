@@ -18,5 +18,8 @@ class ValidationException(
     message: String = "Тело запроса не прошло валидацию",
 ) : ApiException(message)
 
-/** 409 — конфликт состояния, например дубликат заголовка задачи. */
+/** 409 — конфликт состояния, например дубликат заголовка задачи или логина. */
 class ConflictException(message: String) : ApiException(message)
+
+/** 401 — неверные учётные данные или отсутствует/недействителен JWT. */
+class UnauthorizedException(message: String = "Требуется аутентификация") : ApiException(message)
