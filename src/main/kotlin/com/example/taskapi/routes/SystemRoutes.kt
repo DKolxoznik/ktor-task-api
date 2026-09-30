@@ -9,8 +9,7 @@ import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
 
 /**
- * Служебные маршруты: корневая страница со списком эндпоинтов и health-check,
- * который использует Docker HEALTHCHECK.
+ * Служебные маршруты: корневая страница со списком эндпоинтов и health-check.
  */
 fun Route.systemRoutes(service: TaskService, version: String) {
     get("/") {
@@ -19,16 +18,18 @@ fun Route.systemRoutes(service: TaskService, version: String) {
             ApiInfoResponse(
                 service = "ktor-task-api",
                 version = version,
-                description = "REST API для управления задачами на Ktor (КТ-1)",
+                description = "REST API для управления задачами на Ktor (КТ-1 + КТ-2: JWT)",
                 endpoints = listOf(
                     "GET    /health",
+                    "POST   /api/auth/register",
+                    "POST   /api/auth/login",
                     "GET    /api/tasks?status=&priority=&q=&page=&size=&sort=&order=",
                     "GET    /api/tasks/{id}",
                     "GET    /api/tasks/status/{status}",
-                    "POST   /api/tasks",
-                    "PUT    /api/tasks/{id}",
-                    "DELETE /api/tasks/{id}",
-                    "DELETE /api/tasks?status={status}",
+                    "POST   /api/tasks                      (JWT)",
+                    "PUT    /api/tasks/{id}                 (JWT)",
+                    "DELETE /api/tasks/{id}                 (JWT)",
+                    "DELETE /api/tasks?status={status}      (JWT)",
                 ),
             ),
         )

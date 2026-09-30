@@ -1,7 +1,9 @@
 package com.example.taskapi.plugins
 
+import com.example.taskapi.routes.authRoutes
 import com.example.taskapi.routes.systemRoutes
 import com.example.taskapi.routes.taskRoutes
+import com.example.taskapi.service.AuthService
 import com.example.taskapi.service.TaskService
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
@@ -13,12 +15,16 @@ import io.ktor.server.routing.routing
 /**
  * Регистрация всех маршрутов приложения.
  */
-fun Application.configureRouting(service: TaskService, version: String) {
+fun Application.configureRouting(
+    taskService: TaskService,
+    authService: AuthService,
+    version: String,
+) {
     routing {
-        systemRoutes(service, version)
-        taskRoutes(service)
+        systemRoutes(taskService, version)
+        authRoutes(authService)
+        taskRoutes(taskService)
 
-        // Любой неизвестный путь тоже отвечает JSON-ошибкой, а не пустым 404.
         route("{...}") {
             handle {
                 call.respondError(

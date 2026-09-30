@@ -3,6 +3,7 @@ package com.example.taskapi.plugins
 import com.example.taskapi.error.ConflictException
 import com.example.taskapi.error.InvalidParameterException
 import com.example.taskapi.error.NotFoundException
+import com.example.taskapi.error.UnauthorizedException
 import com.example.taskapi.error.ValidationException
 import com.example.taskapi.model.ErrorResponse
 import io.ktor.http.HttpStatusCode
@@ -21,8 +22,6 @@ import java.time.Instant
 
 /**
  * Единая точка превращения исключений в JSON-ответы с корректными HTTP-статусами.
- * Благодаря этому маршруты не содержат try/catch, а клиент всегда получает
- * предсказуемое тело ошибки.
  */
 fun Application.configureStatusPages() {
     install(StatusPages) {
@@ -42,7 +41,10 @@ fun Application.configureStatusPages() {
             call.respondError(HttpStatusCode.Conflict, cause.message)
         }
 
-        // Тело пришло без Content-Type или с типом, для которого нет конвертера.
+        exception<UnauthorizedException> { call, cause ->
+            call.respondError(HttpStatusCode.Unauthorized, cause.message)
+        }
+
         exception<UnsupportedMediaTypeException> { call, _ ->
             call.respondError(
                 HttpStatusCode.UnsupportedMediaType,
@@ -57,7 +59,6 @@ fun Application.configureStatusPages() {
             )
         }
 
-        // Некорректный JSON в теле запроса или несовпадение типов полей.
         exception<JsonConvertException> { call, cause ->
             call.respondError(
                 HttpStatusCode.BadRequest,
@@ -66,7 +67,6 @@ fun Application.configureStatusPages() {
             )
         }
 
-        // Ktor оборачивает ошибки разбора тела и параметров в BadRequestException.
         exception<BadRequestException> { call, cause ->
             call.respondError(
                 HttpStatusCode.BadRequest,
@@ -85,9 +85,6 @@ fun Application.configureStatusPages() {
     }
 }
 
-/**
- * Отправляет тело ошибки в едином формате [ErrorResponse].
- */
 suspend fun ApplicationCall.respondError(
     status: HttpStatusCode,
     message: String?,
