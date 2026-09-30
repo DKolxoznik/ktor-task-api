@@ -1,9 +1,12 @@
-# ktor-task-api — REST API на Ktor (КТ-1)
+# ktor-task-api — REST API на Ktor (КТ-1 + КТ-2)
 
-Учебный REST-сервис управления задачами (task manager) на **Kotlin + Ktor**.
-Реализованы маршруты `GET`, `POST`, `PUT`, `DELETE`, JSON-сериализация через
-`ContentNegotiation` + `kotlinx.serialization`, обработка параметров пути и
-query-строки, а также единообразные ошибки с корректными HTTP-статусами.
+Учебный REST-сервис управления задачами на **Kotlin + Ktor**.
+
+* **КТ-1:** маршруты `GET`, `POST`, `PUT`, `DELETE`, JSON через
+  `ContentNegotiation` + `kotlinx.serialization`, параметры пути и query,
+  осмысленные HTTP-статусы.
+* **КТ-2:** регистрация с BCrypt-хэшем пароля, вход с выдачей JWT и защита
+  маршрутов создания, обновления и удаления. Чтение остаётся публичным.
 
 ---
 
@@ -22,7 +25,7 @@ query-строки, а также единообразные ошибки с к�
   и обработку ошибок вы подключаете как отдельные **плагины** через `install(...)`.
   Приложение получается лёгким, а зависимости — явными. В этом проекте
   подключены плагины `ContentNegotiation`, `StatusPages`, `CallLogging`,
-  `CallId`, `DefaultHeaders`, `CORS`.
+  `CallId`, `DefaultHeaders`, `CORS` и `Authentication` (JWT).
 * **Маршрутизация как Kotlin DSL.** Дерево маршрутов описывается вложенными
   блоками `route / get / post / delete`, без аннотаций и без рефлексии — это
   обычный Kotlin-код, который проверяет компилятор.
@@ -41,9 +44,10 @@ Kotlin, когда тяжёлый «магический» фреймворк и
 HTTP-запрос
    → CallId / CallLogging      (идентификатор запроса и лог)
    → ContentNegotiation        (JSON → data class и обратно)
+   → Authentication (JWT)      (только POST / PUT / DELETE задач)
    → Routing                   (подбор маршрута, разбор path/query параметров)
-   → TaskService               (валидация и бизнес-логика)
-   → TaskRepository            (in-memory хранилище)
+   → TaskService / AuthService (валидация, BCrypt, выдача токена)
+   → TaskRepository / UserRepository
    → StatusPages               (исключение → JSON-ошибка с нужным HTTP-кодом)
 HTTP-ответ
 ```
@@ -58,10 +62,12 @@ HTTP-ответ
 | Ktor | 3.6.0 |
 | Движок | Netty |
 | JSON | kotlinx.serialization 1.9.0 |
-| Сборка | Gradle 8.14.3 (Kotlin DSL, wrapper в репозитории) |
+| Сборка | Gradle 9.7.1 (Kotlin DSL, wrapper в репозитории) |
 | JDK | 17 |
+| Пароли | BCrypt (`at.favre.lib:bcrypt` 0.10.2) |
+| JWT | Ktor Authentication + HMAC256 |
 | Логи | Logback 1.5.18 |
-| Тесты | JUnit 5 + `ktor-server-test-host` (24 теста) |
+| Тесты | JUnit 5 + `ktor-server-test-host` |
 
 ---
 
@@ -85,19 +91,22 @@ ktor-task-api/
     │   │   │   ├── Serialization.kt      # ContentNegotiation + kotlinx.serialization
     │   │   │   ├── Routing.kt            # регистрация маршрутов и catch-all 404
     │   │   │   ├── StatusPages.kt        # исключения → HTTP-статусы
+    │   │   │   ├── Security.kt           # Authentication + JWT, claim userId
     │   │   │   └── Monitoring.kt         # логирование, CallId, CORS, заголовки
     │   │   ├── routes
-    │   │   │   ├── TaskRoutes.kt         # GET / POST / PUT / DELETE
+    │   │   │   ├── TaskRoutes.kt         # CRUD задач (запись требует JWT)
+    │   │   │   ├── AuthRoutes.kt         # регистрация и вход
     │   │   │   ├── SystemRoutes.kt       # / и /health
     │   │   │   └── RequestParams.kt      # разбор path- и query-параметров
-    │   │   ├── service/TaskService.kt    # валидация, фильтры, сортировка, пагинация
-    │   │   ├── repository/TaskRepository.kt  # хранилище в памяти
-    │   │   ├── model/                    # @Serializable модели и DTO
+    │   │   ├── service/                  # TaskService, AuthService
+    │   │   ├── repository/               # TaskRepository, UserRepository
+    │   │   ├── security/                 # PasswordHasher (BCrypt), JwtService
+    │   │   ├── model/                    # задачи, пользователи, DTO запросов
     │   │   └── error/ApiExceptions.kt    # прикладные исключения
     │   └── resources
     │       ├── application.yaml          # порт, хост, модуль приложения
     │       └── logback.xml
-    └── test/kotlin/com/example/taskapi/TaskApiTest.kt
+    └── test/kotlin/com/example/taskapi/  # CRUD, JWT, BCrypt
 ```
 
 ---
@@ -107,7 +116,7 @@ ktor-task-api/
 ### 1. IntelliJ IDEA 2025.3 (основной способ)
 
 1. `File → Open…` → выбрать папку проекта → **Open as Project**.
-2. Дождаться окончания синхронизации Gradle (IDEA сама скачает Gradle 8.14.3 и
+2. Дождаться окончания синхронизации Gradle (IDEA сама скачает Gradle 9.7.1 и
    зависимости; интернет нужен только при первом запуске).
 3. Убедиться, что в `File → Project Structure → Project` выбран **JDK 17**
    (или новее).
@@ -146,10 +155,10 @@ build/install/ktor-task-api/bin/ktor-task-api
 
 ```bash
 # сборка образа
-docker build -t ktor-task-api:1.0.0 .
+docker build -t ktor-task-api:2.0.0 .
 
 # запуск
-docker run --rm -p 8080:8080 --name ktor-task-api ktor-task-api:1.0.0
+docker run --rm -p 8080:8080 --name ktor-task-api ktor-task-api:2.0.0
 ```
 
 Или одной командой через Compose:
@@ -167,7 +176,7 @@ curl http://localhost:8080/health
 Порт меняется переменной окружения `PORT`:
 
 ```bash
-docker run --rm -p 9090:9090 -e PORT=9090 ktor-task-api:1.0.0
+docker run --rm -p 9090:9090 -e PORT=9090 ktor-task-api:2.0.0
 ```
 
 ---
@@ -183,10 +192,12 @@ docker run --rm -p 9090:9090 -e PORT=9090 ktor-task-api:1.0.0
 | `GET` | `/api/tasks` | список задач с фильтрами, сортировкой и пагинацией | `200` |
 | `GET` | `/api/tasks/{id}` | одна задача по идентификатору | `200` |
 | `GET` | `/api/tasks/status/{status}` | задачи с указанным статусом | `200` |
-| `POST` | `/api/tasks` | создать задачу | `201` + заголовок `Location` |
-| `PUT` | `/api/tasks/{id}` | обновить задачу (все поля опциональны) | `200` |
-| `DELETE` | `/api/tasks/{id}` | удалить одну задачу | `204` |
-| `DELETE` | `/api/tasks?status={status}` | удалить все задачи со статусом | `200` |
+| `POST` | `/api/auth/register` | регистрация (пароль хранится как BCrypt-хэш) | `201` |
+| `POST` | `/api/auth/login` | вход, сверка хэша, выдача JWT | `200` |
+| `POST` | `/api/tasks` | создать задачу, **нужен JWT** | `201` + заголовок `Location` |
+| `PUT` | `/api/tasks/{id}` | обновить задачу, **нужен JWT** | `200` |
+| `DELETE` | `/api/tasks/{id}` | удалить одну задачу, **нужен JWT** | `204` |
+| `DELETE` | `/api/tasks?status={status}` | удалить все задачи со статусом, **нужен JWT** | `200` |
 
 ### Параметры пути (path)
 
@@ -210,6 +221,39 @@ docker run --rm -p 9090:9090 -e PORT=9090 ktor-task-api:1.0.0
 Значения enum нечувствительны к регистру: `status=done` работает так же, как
 `status=DONE`.
 
+### Создание и обновление: отдельные DTO без `id`
+
+`POST` принимает `CreateTaskRequest` (`title`, `description`, `status`, `priority`) —
+идентификатор назначает сервер. `PUT` принимает `UpdateTaskRequest`, все поля
+необязательны, обновляются только переданные.
+
+### Аутентификация (КТ-2)
+
+1. `POST /api/auth/register` с `{ "username", "password" }`. Пароль хэшируется
+   BCrypt (cost 12) и в хранилище попадает только хэш. Повторный логин → `409`.
+   В ответе нет ни пароля, ни хэша.
+2. `POST /api/auth/login` сверяет пароль через `BCrypt.verify`, а не сравнением
+   строк. При успехе возвращает JWT (`HMAC256`) со сроком жизни 1 час и claim
+   `userId`. Неверный логин или пароль → `401`.
+3. `POST`, `PUT` и `DELETE` задач требуют заголовок
+   `Authorization: Bearer <token>`. Без токена, с битым токеном или без claim
+   `userId` сервер отвечает `401`. `GET` публичный.
+
+Секрет подписи берётся из `jwt.secret` в `application.yaml` и переопределяется
+переменной `JWT_SECRET`.
+
+Пример токена:
+
+```json
+{
+  "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9....",
+  "tokenType": "Bearer",
+  "expiresIn": 3600,
+  "userId": 1,
+  "username": "alice"
+}
+```
+
 ### Модель задачи
 
 ```json
@@ -230,12 +274,13 @@ docker run --rm -p 9090:9090 -e PORT=9090 ktor-task-api:1.0.0
 
 | Код | Когда возвращается |
 |---|---|
-| `200 OK` | успешное чтение, обновление, массовое удаление |
-| `201 Created` | задача создана; в заголовке `Location` — ссылка на неё |
+| `200 OK` | успешное чтение, обновление, вход, массовое удаление |
+| `201 Created` | задача или пользователь созданы |
 | `204 No Content` | задача удалена, тела ответа нет |
-| `400 Bad Request` | некорректный path/query-параметр, битый JSON, отсутствие обязательного `status` при массовом удалении |
+| `400 Bad Request` | некорректный path/query-параметр, битый JSON |
+| `401 Unauthorized` | неверный пароль, нет токена или токен недействителен |
 | `404 Not Found` | задачи с таким `id` нет либо маршрут не существует |
-| `409 Conflict` | задача с таким `title` уже есть |
+| `409 Conflict` | задача с таким `title` уже есть либо логин занят |
 | `415 Unsupported Media Type` | тело отправлено без `Content-Type: application/json` |
 | `422 Unprocessable Entity` | JSON корректен, но не прошёл валидацию (пустой или слишком длинный `title`) |
 | `500 Internal Server Error` | непредвиденная ошибка (логируется на сервере) |
@@ -260,42 +305,60 @@ docker run --rm -p 9090:9090 -e PORT=9090 ktor-task-api:1.0.0
 ## Примеры запросов
 
 ```bash
-# Список задач
+# Регистрация -> 201 Created (пароль сохраняется как BCrypt-хэш)
+curl -i -X POST http://localhost:8080/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d "{\"username\":\"alice\",\"password\":\"secret1\"}"
+
+# Вход -> 200 OK и JWT с claim userId
+curl -s -X POST http://localhost:8080/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d "{\"username\":\"alice\",\"password\":\"secret1\"}"
+
+# Неверный пароль -> 401
+curl -i -X POST http://localhost:8080/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d "{\"username\":\"alice\",\"password\":\"wrong!!\"}"
+
+# Список задач — публично, токен не нужен
 curl http://localhost:8080/api/tasks
 
-# Фильтр + пагинация + сортировка (query-параметры)
-curl "http://localhost:8080/api/tasks?status=TODO&priority=HIGH&page=1&size=5&sort=TITLE&order=DESC"
-
-# Поиск по тексту
-curl "http://localhost:8080/api/tasks?q=docker"
-
-# Одна задача (path-параметр)
+# Одна задача (path-параметр) — тоже публично
 curl http://localhost:8080/api/tasks/1
 
-# Задачи по статусу в пути
-curl http://localhost:8080/api/tasks/status/IN_PROGRESS
-
-# Создание -> 201 Created
+# Создание без токена -> 401
 curl -i -X POST http://localhost:8080/api/tasks \
   -H "Content-Type: application/json" \
+  -d "{\"title\":\"Новая задача\",\"priority\":\"HIGH\"}"
+
+# Создание с JWT -> 201 Created
+TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d "{\"username\":\"alice\",\"password\":\"secret1\"}" | jq -r .accessToken)
+
+curl -i -X POST http://localhost:8080/api/tasks \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
   -d "{\"title\":\"Новая задача\",\"priority\":\"HIGH\"}"
 
 # Обновление -> 200 OK
 curl -X PUT http://localhost:8080/api/tasks/1 \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
   -d "{\"status\":\"DONE\"}"
 
 # Удаление -> 204 No Content
-curl -i -X DELETE http://localhost:8080/api/tasks/5
+curl -i -X DELETE http://localhost:8080/api/tasks/5 \
+  -H "Authorization: Bearer $TOKEN"
 
-# Массовое удаление по статусу -> 200 OK
-curl -X DELETE "http://localhost:8080/api/tasks?status=DONE"
-
-# Примеры ошибок
-curl -i http://localhost:8080/api/tasks/abc      # 400
-curl -i "http://localhost:8080/api/tasks?size=1000"  # 400
-curl -i http://localhost:8080/api/tasks/9999     # 404
+# Битый токен -> 401
+curl -i -X DELETE http://localhost:8080/api/tasks/5 \
+  -H "Authorization: Bearer not.a.token"
 ```
+
+На Windows PowerShell токен удобнее взять из ответа `/api/auth/login` руками
+и подставить в заголовок `Authorization: Bearer ...`. Готовые запросы лежат
+в `requests.http`.
 
 ---
 
@@ -305,9 +368,10 @@ curl -i http://localhost:8080/api/tasks/9999     # 404
 ./gradlew test
 ```
 
-24 теста на `ktor-server-test-host` покрывают все маршруты, формат JSON,
-разбор параметров и каждый из возвращаемых HTTP-статусов
-(`200/201/204/400/404/409/415/422`). HTML-отчёт: `build/reports/tests/test/index.html`.
+Тесты на `ktor-server-test-host` покрывают CRUD, BCrypt (хэш ≠ пароль,
+`verify` принимает верный пароль и отвергает неверный), выдачу JWT и ответ
+`401` без токена и с недействительным токеном. HTML-отчёт:
+`build/reports/tests/test/index.html`.
 
 ---
 
@@ -317,7 +381,8 @@ curl -i http://localhost:8080/api/tasks/9999     # 404
 |---|---|
 | `main` | стабильное состояние, проверенный результат |
 | `develop` | интеграционная ветка разработки |
-| `feature/kt1-ktor-rest-api` | работа по КТ-1 (текущее задание) |
+| `feature/kt1-ktor-rest-api` | КТ-1: REST без аутентификации |
+| `feature/kt2-auth-jwt` | КТ-2: регистрация, BCrypt, JWT |
 
 Для следующих контрольных точек заводятся ветки `feature/kt2-...`, `feature/kt3-...`
 и вливаются в `develop`, затем в `main`.
@@ -326,6 +391,7 @@ curl -i http://localhost:8080/api/tasks/9999     # 404
 
 ## Данные
 
-Хранилище — in-memory (`ConcurrentHashMap`), при старте заполняется пятью
-демонстрационными задачами. После перезапуска сервера данные возвращаются к
-исходному набору — внешняя БД для этого задания не требуется.
+Хранилище задач и пользователей — in-memory (`ConcurrentHashMap`). Задачи при
+старте заполняются пятью демонстрационными записями, пользователи — пустым
+списком. Пароли хранятся только как BCrypt-хэш. После перезапуска данные
+возвращаются к исходному набору.
