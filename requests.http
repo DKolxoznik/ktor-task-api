@@ -6,8 +6,14 @@
 ### Информация об API
 GET {{host}}/
 
-### Health-check
+### Health-check (смотрите заголовки X-Response-Time и X-Request-Id)
 GET {{host}}/health
+
+### Swagger UI (откройте в браузере: http://localhost:8080/swagger)
+GET {{host}}/swagger
+
+### OpenAPI-спецификация
+GET {{host}}/openapi
 
 ### --- Аутентификация (публично) ---
 

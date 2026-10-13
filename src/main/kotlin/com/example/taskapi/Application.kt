@@ -1,5 +1,6 @@
 package com.example.taskapi
 
+import com.example.taskapi.plugins.configureDocumentation
 import com.example.taskapi.plugins.configureMonitoring
 import com.example.taskapi.plugins.configureRouting
 import com.example.taskapi.plugins.configureSecurity
@@ -18,7 +19,7 @@ import io.ktor.server.netty.EngineMain
 fun main(args: Array<String>) = EngineMain.main(args)
 
 fun Application.module() {
-    val version = environment.config.propertyOrNull("app.version")?.getString() ?: "2.0.0"
+    val version = environment.config.propertyOrNull("app.version")?.getString() ?: "3.0.0"
 
     val jwtConfig = JwtConfig(
         secret = environment.config.property("jwt.secret").getString(),
@@ -35,6 +36,7 @@ fun Application.module() {
     configureMonitoring()
     configureStatusPages()
     configureSecurity(jwtConfig)
+    configureDocumentation()
     configureRouting(taskService, authService, version)
 
     log.info("ktor-task-api $version запущен, задач в хранилище: ${taskService.count()}")

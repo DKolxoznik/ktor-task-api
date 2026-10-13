@@ -11,7 +11,7 @@ plugins {
 }
 
 group = "com.example"
-version = "2.0.0"
+version = "3.0.0"
 
 repositories {
     mavenCentral()
@@ -49,6 +49,10 @@ dependencies {
     implementation("io.ktor:ktor-server-auth:$ktorVersion")
     implementation("io.ktor:ktor-server-auth-jwt:$ktorVersion")
     implementation("at.favre.lib:bcrypt:$bcryptVersion")
+
+    // OpenAPI + Swagger UI (КТ-3)
+    implementation("io.ktor:ktor-server-swagger:$ktorVersion")
+    implementation("io.ktor:ktor-server-openapi:$ktorVersion")
 
     // Tests
     testImplementation(platform("org.junit:junit-bom:5.14.4"))
