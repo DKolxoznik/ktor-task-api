@@ -44,7 +44,7 @@ private fun ApplicationTestBuilder.startApp(): HttpClient {
             "jwt.audience" to "ktor-task-api-users",
             "jwt.realm" to "ktor-task-api",
             "jwt.expiresInSeconds" to "3600",
-            "app.version" to "2.0.0",
+            "app.version" to "3.0.0",
         )
     }
     application { module() }
