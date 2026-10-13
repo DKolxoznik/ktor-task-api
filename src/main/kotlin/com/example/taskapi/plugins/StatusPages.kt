@@ -16,12 +16,18 @@ import io.ktor.server.plugins.BadRequestException
 import io.ktor.server.plugins.CannotTransformContentToTypeException
 import io.ktor.server.plugins.UnsupportedMediaTypeException
 import io.ktor.server.plugins.statuspages.StatusPages
+import io.ktor.server.request.httpMethod
 import io.ktor.server.request.path
 import io.ktor.server.response.respond
 import java.time.Instant
 
 /**
- * Единая точка превращения исключений в JSON-ответы с корректными HTTP-статусами.
+ * Централизованная обработка ошибок через StatusPages (КТ-3).
+ *
+ * Маршруты не содержат try/catch: любой выброс [ApiException] или системной
+ * ошибки превращается здесь в единый JSON [ErrorResponse] с нужным HTTP-кодом.
+ * Дополнительно перехватываются «голые» статусы 401/404/405, если кто-то
+ * выставил их без тела.
  */
 fun Application.configureStatusPages() {
     install(StatusPages) {
@@ -80,6 +86,14 @@ fun Application.configureStatusPages() {
             call.respondError(
                 HttpStatusCode.InternalServerError,
                 "Внутренняя ошибка сервера",
+            )
+        }
+
+        // Статусы без тела (например Method Not Allowed) тоже получают JSON.
+        status(HttpStatusCode.MethodNotAllowed) { call, statusCode ->
+            call.respondError(
+                statusCode,
+                "Метод ${call.request.httpMethod.value} не поддерживается для ${call.request.path()}",
             )
         }
     }

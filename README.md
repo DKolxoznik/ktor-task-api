@@ -1,4 +1,4 @@
-# ktor-task-api — REST API на Ktor (КТ-1 + КТ-2)
+# ktor-task-api — REST API на Ktor (КТ-1 + КТ-2 + КТ-3)
 
 Учебный REST-сервис управления задачами на **Kotlin + Ktor**.
 
@@ -7,6 +7,8 @@
   осмысленные HTTP-статусы.
 * **КТ-2:** регистрация с BCrypt-хэшем пароля, вход с выдачей JWT и защита
   маршрутов создания, обновления и удаления. Чтение остаётся публичным.
+* **КТ-3:** Swagger UI + OpenAPI, тесты ключевых точек, централизованный
+  `StatusPages`, middleware логирования (`CallLogging` + `RequestTiming`).
 
 ---
 
@@ -25,7 +27,8 @@
   и обработку ошибок вы подключаете как отдельные **плагины** через `install(...)`.
   Приложение получается лёгким, а зависимости — явными. В этом проекте
   подключены плагины `ContentNegotiation`, `StatusPages`, `CallLogging`,
-  `CallId`, `DefaultHeaders`, `CORS` и `Authentication` (JWT).
+  `CallId`, `DefaultHeaders`, `CORS`, `Authentication` (JWT), `Swagger` и
+  `OpenAPI`.
 * **Маршрутизация как Kotlin DSL.** Дерево маршрутов описывается вложенными
   блоками `route / get / post / delete`, без аннотаций и без рефлексии — это
   обычный Kotlin-код, который проверяет компилятор.
@@ -42,13 +45,12 @@ Kotlin, когда тяжёлый «магический» фреймворк и
 
 ```
 HTTP-запрос
-   → CallId / CallLogging      (идентификатор запроса и лог)
-   → ContentNegotiation        (JSON → data class и обратно)
-   → Authentication (JWT)      (только POST / PUT / DELETE задач)
-   → Routing                   (подбор маршрута, разбор path/query параметров)
-   → TaskService / AuthService (валидация, BCrypt, выдача токена)
-   → TaskRepository / UserRepository
-   → StatusPages               (исключение → JSON-ошибка с нужным HTTP-кодом)
+   → CallId / CallLogging / RequestTiming   (middleware: лог + X-Response-Time)
+   → ContentNegotiation                     (JSON → data class и обратно)
+   → Authentication (JWT)                   (только POST / PUT / DELETE задач)
+   → Routing                                (включая /swagger и /openapi)
+   → TaskService / AuthService
+   → StatusPages                            (централизованные JSON-ошибки)
 HTTP-ответ
 ```
 
@@ -66,7 +68,8 @@ HTTP-ответ
 | JDK | 17 |
 | Пароли | BCrypt (`at.favre.lib:bcrypt` 0.10.2) |
 | JWT | Ktor Authentication + HMAC256 |
-| Логи | Logback 1.5.18 |
+| OpenAPI / Swagger | `ktor-server-openapi` + `ktor-server-swagger` |
+| Логи / middleware | CallLogging, CallId, RequestTiming |
 | Тесты | JUnit 5 + `ktor-server-test-host` |
 
 ---
@@ -92,7 +95,8 @@ ktor-task-api/
     │   │   │   ├── Routing.kt            # регистрация маршрутов и catch-all 404
     │   │   │   ├── StatusPages.kt        # исключения → HTTP-статусы
     │   │   │   ├── Security.kt           # Authentication + JWT, claim userId
-    │   │   │   └── Monitoring.kt         # логирование, CallId, CORS, заголовки
+    │   │   │   ├── Documentation.kt      # Swagger UI + OpenAPI (КТ-3)
+    │   │   │   └── Monitoring.kt         # middleware: CallLogging, RequestTiming
     │   │   ├── routes
     │   │   │   ├── TaskRoutes.kt         # CRUD задач (запись требует JWT)
     │   │   │   ├── AuthRoutes.kt         # регистрация и вход
@@ -104,9 +108,10 @@ ktor-task-api/
     │   │   ├── model/                    # задачи, пользователи, DTO запросов
     │   │   └── error/ApiExceptions.kt    # прикладные исключения
     │   └── resources
-    │       ├── application.yaml          # порт, хост, модуль приложения
-    │       └── logback.xml
-    └── test/kotlin/com/example/taskapi/  # CRUD, JWT, BCrypt
+    │       ├── application.yaml
+    │       ├── logback.xml
+    │       └── openapi/documentation.yaml  # полная OpenAPI 3 спецификация
+    └── test/kotlin/com/example/taskapi/    # CRUD, JWT, Swagger, middleware
 ```
 
 ---
@@ -155,10 +160,10 @@ build/install/ktor-task-api/bin/ktor-task-api
 
 ```bash
 # сборка образа
-docker build -t ktor-task-api:2.0.0 .
+docker build -t ktor-task-api:3.0.0 .
 
 # запуск
-docker run --rm -p 8080:8080 --name ktor-task-api ktor-task-api:2.0.0
+docker run --rm -p 8080:8080 --name ktor-task-api ktor-task-api:3.0.0
 ```
 
 Или одной командой через Compose:
@@ -176,7 +181,7 @@ curl http://localhost:8080/health
 Порт меняется переменной окружения `PORT`:
 
 ```bash
-docker run --rm -p 9090:9090 -e PORT=9090 ktor-task-api:2.0.0
+docker run --rm -p 9090:9090 -e PORT=9090 ktor-task-api:3.0.0
 ```
 
 ---
@@ -189,6 +194,8 @@ docker run --rm -p 9090:9090 -e PORT=9090 ktor-task-api:2.0.0
 |---|---|---|---|
 | `GET` | `/` | информация об API и список маршрутов | `200` |
 | `GET` | `/health` | health-check (используется в Docker HEALTHCHECK) | `200` |
+| `GET` | `/swagger` | Swagger UI (интерактивная документация) | `200` |
+| `GET` | `/openapi` | OpenAPI-спецификация (YAML) | `200` |
 | `GET` | `/api/tasks` | список задач с фильтрами, сортировкой и пагинацией | `200` |
 | `GET` | `/api/tasks/{id}` | одна задача по идентификатору | `200` |
 | `GET` | `/api/tasks/status/{status}` | задачи с указанным статусом | `200` |
@@ -362,16 +369,76 @@ curl -i -X DELETE http://localhost:8080/api/tasks/5 \
 
 ---
 
-## Тесты
+## Swagger UI и OpenAPI (КТ-3)
+
+После запуска сервера откройте в браузере:
+
+* [http://localhost:8080/swagger](http://localhost:8080/swagger) — Swagger UI
+* [http://localhost:8080/openapi](http://localhost:8080/openapi) — сырая спецификация
+
+В Swagger UI можно:
+
+1. Вызвать `POST /api/auth/register` и `POST /api/auth/login`.
+2. Нажать **Authorize**, вставить `accessToken` из ответа логина.
+3. Вызывать защищённые `POST` / `PUT` / `DELETE` задач.
+
+Спецификация: `src/main/resources/openapi/documentation.yaml` — все маршруты,
+DTO, коды ответов и security scheme `bearerAuth`.
+
+### StatusPages и middleware
+
+* **StatusPages** — единая точка: исключения → JSON `ErrorResponse` с кодами
+  `400/401/404/409/415/422/500`.
+* **CallLogging** — в лог строка `GET /api/tasks -> 200 12ms`.
+* **RequestTiming** — заголовок ответа `X-Response-Time: 12ms`.
+* **CallId** — заголовок `X-Request-Id` на каждый запрос.
+
+---
+
+## Тесты и как их запускать
+
+### Командная строка
 
 ```bash
+# Windows
+gradlew.bat test
+
+# Linux / macOS
 ./gradlew test
 ```
 
-Тесты на `ktor-server-test-host` покрывают CRUD, BCrypt (хэш ≠ пароль,
-`verify` принимает верный пароль и отвергает неверный), выдачу JWT и ответ
-`401` без токена и с недействительным токеном. HTML-отчёт:
-`build/reports/tests/test/index.html`.
+HTML-отчёт: `build/reports/tests/test/index.html`.
+
+### IntelliJ IDEA
+
+1. Открыть проект, дождаться синхронизации Gradle.
+2. Правый клик по `src/test/kotlin` → **Run 'Tests in ...'**.
+3. Либо зелёная стрелка у конкретного класса (`TaskApiTest`, `AuthApiTest`,
+   `SwaggerAndMiddlewareTest`, `PasswordHasherTest`).
+
+### Что покрывают тесты
+
+| Группа | Что проверяется |
+|---|---|
+| CRUD задач | список, get по id, create/update/delete, пагинация, фильтры |
+| Auth / JWT | регистрация, дубликат логина, вход, неверный пароль, 401 без токена |
+| BCrypt | хэш ≠ plaintext, `verify` принимает верный и отвергает неверный |
+| Swagger / OpenAPI | `/swagger` и `/openapi` доступны, в спецификации есть ключевые пути |
+| StatusPages | 400/401/404 приходят как единый JSON `ErrorResponse` |
+| Middleware | заголовки `X-Response-Time`, `X-Service`, `X-Request-Id` |
+
+Все тесты должны быть зелёными перед сдачей.
+
+### Ручная проверка после запуска
+
+```bash
+curl http://localhost:8080/swagger
+curl http://localhost:8080/openapi
+curl -i http://localhost:8080/health   # смотрите X-Response-Time и X-Request-Id
+curl -i http://localhost:8080/api/tasks/9999   # JSON 404 через StatusPages
+```
+
+Или файл `requests.http` в IntelliJ HTTP Client.
 
 ---
 
@@ -383,6 +450,7 @@ curl -i -X DELETE http://localhost:8080/api/tasks/5 \
 | `develop` | интеграционная ветка разработки |
 | `feature/kt1-ktor-rest-api` | КТ-1: REST без аутентификации |
 | `feature/kt2-auth-jwt` | КТ-2: регистрация, BCrypt, JWT |
+| `feature/kt3-swagger-openapi` | КТ-3: Swagger, OpenAPI, StatusPages, middleware |
 
 Для следующих контрольных точек заводятся ветки `feature/kt2-...`, `feature/kt3-...`
 и вливаются в `develop`, затем в `main`.

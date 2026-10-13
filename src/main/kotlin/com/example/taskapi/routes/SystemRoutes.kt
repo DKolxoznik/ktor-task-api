@@ -9,7 +9,8 @@ import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
 
 /**
- * Служебные маршруты: корневая страница со списком эндпоинтов и health-check.
+ * Служебные маршруты: корневая страница, health-check.
+ * Swagger UI: /swagger, OpenAPI: /openapi.
  */
 fun Route.systemRoutes(service: TaskService, version: String) {
     get("/") {
@@ -18,9 +19,11 @@ fun Route.systemRoutes(service: TaskService, version: String) {
             ApiInfoResponse(
                 service = "ktor-task-api",
                 version = version,
-                description = "REST API для управления задачами на Ktor (КТ-1 + КТ-2: JWT)",
+                description = "REST API на Ktor (КТ-1 CRUD, КТ-2 JWT, КТ-3 Swagger/OpenAPI)",
                 endpoints = listOf(
                     "GET    /health",
+                    "GET    /swagger",
+                    "GET    /openapi",
                     "POST   /api/auth/register",
                     "POST   /api/auth/login",
                     "GET    /api/tasks?status=&priority=&q=&page=&size=&sort=&order=",
