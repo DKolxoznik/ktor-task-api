@@ -1,0 +1,435 @@
+openapi: 3.0.3
+info:
+  title: ktor-task-api
+  description: |
+    REST API управления задачами на Kotlin/Ktor.
+
+    **КТ-1** — CRUD, JSON, path/query параметры, HTTP-статусы.
+    **КТ-2** — регистрация (BCrypt), вход (JWT), защита записи.
+    **КТ-3** — OpenAPI / Swagger UI, StatusPages, middleware логирования.
+
+    Маршруты `GET` публичные. `POST` / `PUT` / `DELETE` задач требуют
+    заголовок `Authorization: Bearer <token>`.
+  version: 3.0.0
+  contact:
+    name: DKolxoznik
+
+servers:
+  - url: http://localhost:8080
+    description: Локальный запуск (IDEA / Gradle / Docker)
+
+tags:
+  - name: System
+    description: Служебные маршруты
+  - name: Auth
+    description: Регистрация и вход (JWT)
+  - name: Tasks
+    description: CRUD задач
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT из POST /api/auth/login. В payload есть claim userId.
+
+  schemas:
+    TaskStatus:
+      type: string
+      enum: [TODO, IN_PROGRESS, DONE]
+    TaskPriority:
+      type: string
+      enum: [LOW, MEDIUM, HIGH]
+    Task:
+      type: object
+      required: [id, title, status, priority, createdAt, updatedAt]
+      properties:
+        id: { type: integer, example: 1 }
+        title: { type: string, example: Изучить Ktor }
+        description: { type: string, nullable: true, example: Разобраться с плагинами }
+        status: { $ref: '#/components/schemas/TaskStatus' }
+        priority: { $ref: '#/components/schemas/TaskPriority' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    CreateTaskRequest:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string, example: Новая задача }
+        description: { type: string, nullable: true }
+        status: { $ref: '#/components/schemas/TaskStatus' }
+        priority: { $ref: '#/components/schemas/TaskPriority' }
+    UpdateTaskRequest:
+      type: object
+      properties:
+        title: { type: string }
+        description: { type: string, nullable: true }
+        status: { $ref: '#/components/schemas/TaskStatus' }
+        priority: { $ref: '#/components/schemas/TaskPriority' }
+    PageTask:
+      type: object
+      required: [items, page, size, totalItems, totalPages]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Task' }
+        page: { type: integer, example: 1 }
+        size: { type: integer, example: 20 }
+        totalItems: { type: integer, example: 5 }
+        totalPages: { type: integer, example: 1 }
+    BulkDeleteResponse:
+      type: object
+      required: [deleted, status, remaining]
+      properties:
+        deleted: { type: integer, example: 2 }
+        status: { $ref: '#/components/schemas/TaskStatus' }
+        remaining: { type: integer, example: 3 }
+    RegisterRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string, minLength: 3, maxLength: 32, example: alice }
+        password: { type: string, minLength: 6, maxLength: 72, example: secret1, format: password }
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string, example: alice }
+        password: { type: string, example: secret1, format: password }
+    UserResponse:
+      type: object
+      required: [id, username, createdAt]
+      properties:
+        id: { type: integer, example: 1 }
+        username: { type: string, example: alice }
+        createdAt: { type: string, format: date-time }
+    TokenResponse:
+      type: object
+      required: [accessToken, tokenType, expiresIn, userId, username]
+      properties:
+        accessToken: { type: string, description: JWT }
+        tokenType: { type: string, example: Bearer }
+        expiresIn: { type: integer, example: 3600, description: Срок жизни в секундах }
+        userId: { type: integer, example: 1, description: Claim userId в токене }
+        username: { type: string, example: alice }
+    HealthResponse:
+      type: object
+      required: [status, service, version, tasksInStorage]
+      properties:
+        status: { type: string, example: UP }
+        service: { type: string, example: ktor-task-api }
+        version: { type: string, example: 3.0.0 }
+        tasksInStorage: { type: integer, example: 5 }
+    ApiInfoResponse:
+      type: object
+      required: [service, version, description, endpoints]
+      properties:
+        service: { type: string }
+        version: { type: string }
+        description: { type: string }
+        endpoints:
+          type: array
+          items: { type: string }
+    ErrorResponse:
+      type: object
+      required: [status, error, message, timestamp]
+      properties:
+        status: { type: integer, example: 401 }
+        error: { type: string, example: Unauthorized }
+        message: { type: string, example: Неверный логин или пароль }
+        details:
+          type: array
+          items: { type: string }
+        path: { type: string, example: /api/auth/login }
+        timestamp: { type: string, format: date-time }
+
+  responses:
+    BadRequest:
+      description: Некорректный параметр или JSON
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Unauthorized:
+      description: Нет токена, токен недействителен или неверный пароль
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    NotFound:
+      description: Ресурс не найден
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Conflict:
+      description: Конфликт (дубликат title или username)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Unprocessable:
+      description: Ошибка валидации тела
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    UnsupportedMedia:
+      description: Нет Content-Type application/json
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+paths:
+  /:
+    get:
+      tags: [System]
+      summary: Информация об API
+      operationId: getApiInfo
+      responses:
+        '200':
+          description: Краткое описание и список маршрутов
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiInfoResponse' }
+
+  /health:
+    get:
+      tags: [System]
+      summary: Health-check
+      operationId: getHealth
+      responses:
+        '200':
+          description: Сервис работает
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HealthResponse' }
+
+  /api/auth/register:
+    post:
+      tags: [Auth]
+      summary: Регистрация пользователя
+      description: Пароль сохраняется только как BCrypt-хэш. В ответе нет пароля.
+      operationId: register
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        '201':
+          description: Пользователь создан
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserResponse' }
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+        '415':
+          $ref: '#/components/responses/UnsupportedMedia'
+
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      summary: Вход и выдача JWT
+      description: Пароль проверяется через BCrypt.verify. В токене claim userId.
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: JWT выдан
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenResponse' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+
+  /api/tasks:
+    get:
+      tags: [Tasks]
+      summary: Список задач
+      description: Публичный маршрут. Фильтры, сортировка и пагинация через query.
+      operationId: listTasks
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/TaskStatus' }
+        - name: priority
+          in: query
+          schema: { $ref: '#/components/schemas/TaskPriority' }
+        - name: q
+          in: query
+          description: Поиск по title и description
+          schema: { type: string }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [ID, TITLE, STATUS, PRIORITY, CREATED_AT]
+            default: ID
+        - name: order
+          in: query
+          schema:
+            type: string
+            enum: [ASC, DESC]
+            default: ASC
+      responses:
+        '200':
+          description: Страница задач
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PageTask' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+    post:
+      tags: [Tasks]
+      summary: Создать задачу
+      description: Требует JWT. CreateTaskRequest без id.
+      operationId: createTask
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTaskRequest' }
+      responses:
+        '201':
+          description: Задача создана
+          headers:
+            Location:
+              schema: { type: string, example: /api/tasks/6 }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Task' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+    delete:
+      tags: [Tasks]
+      summary: Массовое удаление по статусу
+      description: Требует JWT и обязательный query-параметр status.
+      operationId: bulkDeleteTasks
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/TaskStatus' }
+      responses:
+        '200':
+          description: Сколько задач удалено
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BulkDeleteResponse' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/tasks/{id}:
+    get:
+      tags: [Tasks]
+      summary: Задача по id
+      operationId: getTask
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Найдена
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Task' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Tasks]
+      summary: Обновить задачу
+      description: Требует JWT. UpdateTaskRequest — все поля опциональны.
+      operationId: updateTask
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateTaskRequest' }
+      responses:
+        '200':
+          description: Обновлена
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Task' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+    delete:
+      tags: [Tasks]
+      summary: Удалить задачу
+      description: Требует JWT. Ответ без тела.
+      operationId: deleteTask
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '204':
+          description: Удалена
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/tasks/status/{status}:
+    get:
+      tags: [Tasks]
+      summary: Задачи по статусу в path
+      operationId: listTasksByStatus
+      parameters:
+        - name: status
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/TaskStatus' }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Страница задач
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PageTask' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
