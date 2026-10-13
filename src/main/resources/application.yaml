@@ -10,7 +10,7 @@ ktor:
       - com.example.taskapi.ApplicationKt.module
 
 app:
-  version: "2.0.0"
+  version: "3.0.0"
 
 # JWT: секрет можно переопределить переменной JWT_SECRET
 jwt:
